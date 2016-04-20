@@ -78,16 +78,31 @@ object HelloWorld {
 
   }
 
-  def am_setup(predictor_vectors : List[DenseVector[Double]], knots : List[DenseVector[Double]]): Unit ={
-    val tupel_list = predictor_vectors.zip(knots)
-    tupel_list.map{ case (x_vector, knots) => form_X(x_vector, knots)}.fold(DenseMatrix.ones[Double]){ (a : DenseMatrix[Double],b :DenseMatrix[Double]) => DenseMatrix.vertcat(a,b)}
+  def am_setup(predictor_vectors : List[DenseVector[Double]], knots_vectors : List[DenseVector[Double]], lambdas : DenseVector[Double]) :  (DenseMatrix[Double], DenseMatrix[Double]) ={
+    val tupel_list = predictor_vectors.zip(knots_vectors)
+
+    val Xa = tupel_list.map{ case (x_vector, knots) => form_X(x_vector, knots)}.foldLeft(DenseMatrix.ones[Double](19,1)){(agg,ele) => DenseMatrix.horzcat(agg,ele)}
+
+    val S = knots_vectors.map(e => form_S(e)).foldLeft(DenseMatrix.ones[Double](5,1)){(agg,ele) => DenseMatrix.horzcat(agg,ele)}
+
+    (Xa, S)
   }
 
+
+    // TODO: just pass in BD
   def form_X(x : DenseVector[Double], knots : DenseVector[Double]) : DenseMatrix[Double] = {
     val bd_list = getBD(knots)
     val BD = bd_list(0) \ bd_list(1)
     predict_matrix_cyclic_smooth(x ,knots, BD)
   }
+
+  def form_S(knots : DenseVector[Double]) :  DenseMatrix[Double] = {
+    val bd_list = getBD(knots)
+    val BD = bd_list(0) \ bd_list(1)
+    bd_list(1).t * BD
+  }
+
+
 
   def prs_fit(y : DenseVector[Double], x : DenseVector[Double], knots : DenseVector[Double], lambda : Double) : (DenseMatrix[Double], DenseVector[Double], DenseVector[Double]) = {
     val bd_list = getBD(knots)
@@ -308,7 +323,7 @@ object HelloWorld {
 
   def vectorSubsetByIndexVector(vector : DenseVector[Double],  index_vector : DenseVector[Int]) : DenseVector[Double] = {
     DenseVector.tabulate(index_vector.length){e => vector(index_vector(e))}
-  }
+  }f
 
   def rowProduct(X : DenseMatrix[Double] , v : DenseVector[Double]) : DenseMatrix[Double] = {
     DenseMatrix.tabulate(X.rows, X.cols){case (i, j) => (X(i,j)*v(i))}
