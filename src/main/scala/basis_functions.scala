@@ -19,10 +19,11 @@ object HelloWorld {
     val lambda = 1e-8
 
 
+    val (x_, y_, beta) = gam(wear, List(x,x),List(knots,knots))
 
 
 
-    //println("bd_list(0)")
+    /*println("bd_list(0)")
     //println(bd_list(0))
     //println("bd_list(1)")
     //println(bd_list(1))
@@ -57,7 +58,7 @@ object HelloWorld {
 
     println(try_lambda(wear, x, knots, lambda, 1 ,wear.length-1, List()))
 
-
+    */
   }
 
 
@@ -78,13 +79,7 @@ object HelloWorld {
 
   }
 
-  def am_setup(predictors : List[DenseVector[Double]], knots : List[DenseVector[Double]], lambdas : DenseVector[Double]) :  (DenseMatrix[Double], DenseMatrix[Double]) ={
-    val tupel_list = predictors.zip(knots)
 
-    val Xa = tupel_list.map{ case (x_vector, knot_vector) => form_X(x_vector, knot_vector)}.foldLeft(DenseMatrix.ones[Double](19,1)){(agg,ele) => DenseMatrix.horzcat(agg,ele)}
-    val S = knots.zipWithIndex.map{ case (knot_vector, index) => lambdas(index) * form_S(knot_vector)}.foldLeft(DenseMatrix.ones[Double](5,1)){(agg,ele) => DenseMatrix.horzcat(agg,ele)}
-    (Xa, S)
-  }
 
 
     // TODO: just pass in BD
@@ -100,19 +95,64 @@ object HelloWorld {
     bd_list(1).t * BD
   }
 
-  def fit_gam(y: DenseVector[Double], Xa : DenseMatrix[Double], S : DenseMatrix[Double]) =  {
-    val X1 = DenseMatrix.horzcat(Xa, S)
-    val beta = 1
-    val norm = 0
-    val old_norm = 1
-    while(abs(norm - old_norm) > 0.0002){
-      val eta : DenseVector[Double] = X1 * beta
-      val mu = exp(eta)
-      //val z = (y-mu)/mu + eta
-      val z = DenseVector.vertcat((y-mu)/mu + eta, DenseVector.zeros[Double](Xa.rows-y.length))
-      val b = z \ Xa
-    }
+
+  def gam(response : DenseVector[Double], predictors : List[DenseVector[Double]], knots : List[DenseVector[Double]] ) = {
+    val lambdas = DenseVector(0.0001, 0.0002)
+    val (xa_, s_) = gam_setup(predictors, knots)
+    fit_gam(response, xa_, s_,lambdas)
   }
+
+  def gam_setup(predictors : List[DenseVector[Double]], knots : List[DenseVector[Double]]) :  (DenseMatrix[Double], List[DenseMatrix[Double]]) ={
+
+    val Xa = predictors.zip(knots).map{ case (x_vector, knot_vector) => form_X(x_vector, knot_vector)}.foldLeft(DenseMatrix.ones[Double](19,1)){(agg,ele) => DenseMatrix.horzcat(agg,ele)}
+    val S = knots.zipWithIndex.map{ case (knot_vector, index) => align_S(form_S(knot_vector),index, knots.length)}
+    (Xa, S)
+  }
+
+  def align_S(S : DenseMatrix[Double], index : Int, max : Int) : DenseMatrix[Double] = {
+      val full_S = DenseMatrix.zeros[Double](S.rows*max, S.cols)
+      full_S(index*S.rows to ((index+1)*S.rows)-1, 0 to S.cols-1) := S
+      full_S
+  }
+
+  def fit_gam(y: DenseVector[Double], Xa : DenseMatrix[Double], S_list : List[DenseMatrix[Double]], lambdas : DenseVector[Double]) =  {
+
+    val S = S_list.zipWithIndex.map{ case (s_matrix, lambda_index) => s_matrix * lambdas(lambda_index)}.foldLeft(DenseMatrix.ones[Double](10,1)){(agg,ele) => DenseMatrix.horzcat(agg,ele)}
+    println(S(::, 1 to S.cols-1))
+    println(Xa(::, 1 to Xa.cols-1))
+    println(matrix_square_root(S(::, 1 to S.cols-1)))
+    val X1 = DenseMatrix.vertcat(Xa(::, 1 to Xa.cols-1), matrix_square_root(S(::, 1 to S.cols-1)))
+
+    fitting_loop(X1, y, Xa.cols ,Xa.rows, DenseVector.vertcat(DenseVector(1.0), DenseVector.zeros[Double](X1.cols-1)) , false)
+
+  }
+
+  def fitting_loop(X1 : DenseMatrix[Double], y : DenseVector[Double], q : Int ,n : Int , beta : DenseVector[Double], norm : Boolean): (DenseMatrix[Double], DenseVector[Double], DenseVector[Double]) = norm match {
+    case true =>
+      (X1, y, beta)
+    case _ =>
+      println("X1.rows")
+      println(X1)
+      println("beta")
+      println(beta)
+      val eta_ = (X1 * beta)
+      println("eta_")
+      println(eta_)
+      val eta = eta_(0 to n-1)
+      println("eta")
+      println(eta)
+      val mu = exp(eta)
+      //n-y.length
+      val z = DenseVector.vertcat((y-mu)/mu + eta, DenseVector.zeros[Double](X1.rows-y.length))
+      println("z")
+      println(z)
+      println(X1)
+      val new_beta = X1 \ z
+      val tra_ = trA(X1, y.length-1)
+      val norm = form_residuals_squared(X1, new_beta, z, y.length-1)
+      fitting_loop(X1, y, q, n ,new_beta,false)
+  }
+
 
   def prs_fit(y : DenseVector[Double], x : DenseVector[Double], knots : DenseVector[Double], lambda : Double) : (DenseMatrix[Double], DenseVector[Double], DenseVector[Double]) = {
     val bd_list = getBD(knots)
@@ -121,7 +161,10 @@ object HelloWorld {
     val Xa = DenseMatrix.vertcat(X, (matrix_square_root(bd_list(1).t * BD) * sqrt(lambda)))
     val ya = DenseVector.vertcat(y, DenseVector.zeros[Double](Xa.rows-y.length))
     (Xa, Xa \ ya, ya)
+
   }
+
+
 
   def form_residuals_squared(X :DenseMatrix[Double], beta : DenseVector[Double], y : DenseVector[Double], n : Int): Double ={
     val vals = pow((y-X*beta),2)
@@ -288,13 +331,6 @@ object HelloWorld {
       val j_ = replace(knots.length-1,x,j,knots)
       val j1, hj = j_.map( each => each.toInt - 1 )
       val j__ = j_.map(ele => if(ele == n-1) 0 else ele.toInt)
-
-      //println("j__")
-      //println(j__)
-      //println("j1")
-      //println(j1)
-      //println("hj")
-      //println(hj)
       val I = diag(DenseVector.ones[Double](n-1))
 
       rowProduct(matrixSubsetByIndexVector(BD,hj),pow(vectorSubsetByIndexVector(knots, j1+1)-x, 3) :/ (vectorSubsetByIndexVector(h,hj) * 6.0)) +
@@ -333,7 +369,7 @@ object HelloWorld {
 
   def vectorSubsetByIndexVector(vector : DenseVector[Double],  index_vector : DenseVector[Int]) : DenseVector[Double] = {
     DenseVector.tabulate(index_vector.length){e => vector(index_vector(e))}
-  }f
+  }
 
   def rowProduct(X : DenseMatrix[Double] , v : DenseVector[Double]) : DenseMatrix[Double] = {
     DenseMatrix.tabulate(X.rows, X.cols){case (i, j) => (X(i,j)*v(i))}
