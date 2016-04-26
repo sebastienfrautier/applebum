@@ -18,8 +18,9 @@ object HelloWorld {
     val x = pp/(max(pp))
     val lambda = 1e-8
 
-
     val (x_, y_, beta) = gam(wear, List(x,x),List(knots,knots))
+
+    //println((x_, y_, beta))
 
 
 
@@ -41,7 +42,7 @@ object HelloWorld {
     val Xa = DenseMatrix.vertcat(X, (matrix_square_root(bd_list(1).t * BD) * sqrt(lambda)))
     val y = DenseVector.vertcat(wear, DenseVector.zeros[Double](Xa.rows-wear.length))
     val model_coeff = Xa \ y
-    val Xpredict = predict_matrix_cyclic_smooth(xp, knots, BD)
+
     //println(model_coeff)
 
     val qqq = Xpredict * (X \ wear)
@@ -53,12 +54,21 @@ object HelloWorld {
     breeze.linalg.csvwrite(new File("/Users/kbrusch/dev/gam-fitting-in-spark/data/X.csv")
       ,qqq.asDenseMatrix )
 
-    breeze.linalg.csvwrite(new File("/Users/kbrusch/dev/gam-fitting-in-spark/data/S.csv")
-      ,sss.asDenseMatrix )
 
     println(try_lambda(wear, x, knots, lambda, 1 ,wear.length-1, List()))
+  */
+    val bd_list = getBD(knots)
+    val BD = bd_list(0) \ bd_list(1)
+    val Xpredict = predict_matrix_cyclic_smooth(xp, knots, BD)
+    println(x_.rows)
+    println(x_.cols)
 
-    */
+    val adjusted_beta  =  DenseVector.vertcat(beta(0 to 4),DenseVector.ones[Double](5))
+    val gam_fitted = x_ * adjusted_beta
+
+    breeze.linalg.csvwrite(new File("/Users/kbrusch/dev/gam-fitting-in-spark/data/beta.csv")
+      ,gam_fitted.asDenseMatrix)
+
   }
 
 
@@ -66,13 +76,14 @@ object HelloWorld {
 
     case 60 =>
       val (xa, coeffs,ya) = prs_fit(y,x,knots,lambda)
-      val tra = trA(xa, n)
+      //// watch for xa
+      val tra = trA(xa,xa, n)
       val rss = form_residuals_squared(xa, coeffs, ya, n)
       val gcv = n*rss/pow((n-tra),2)
       scores :+ (lambda,gcv)
     case _ =>
       val (xa, coeffs,ya) = prs_fit(y,x,knots,lambda)
-      val tra = trA(xa, n)
+      val tra = trA(xa,xa, n)
       val rss = form_residuals_squared(xa, coeffs, ya, n)
       val gcv = n*rss/pow((n-tra),2)
       try_lambda(y, x, knots, lambda*1.5, i+1,n, scores :+ (lambda,gcv))
@@ -123,34 +134,38 @@ object HelloWorld {
     println(matrix_square_root(S(::, 1 to S.cols-1)))
     val X1 = DenseMatrix.vertcat(Xa(::, 1 to Xa.cols-1), matrix_square_root(S(::, 1 to S.cols-1)))
 
-    fitting_loop(X1, y, Xa.cols ,Xa.rows, DenseVector.vertcat(DenseVector(1.0), DenseVector.zeros[Double](X1.cols-1)) , false)
+    fitting_loop(X1, y, Xa.cols ,Xa.rows, DenseVector.vertcat(DenseVector(1.0), DenseVector.zeros[Double](X1.cols-1)) , 0.0 , false)
 
   }
 
-  def fitting_loop(X1 : DenseMatrix[Double], y : DenseVector[Double], q : Int ,n : Int , beta : DenseVector[Double], norm : Boolean): (DenseMatrix[Double], DenseVector[Double], DenseVector[Double]) = norm match {
+  def fitting_loop(X1 : DenseMatrix[Double], y : DenseVector[Double], q : Int ,n : Int , beta : DenseVector[Double], norm : Double, norm_switch : Boolean): (DenseMatrix[Double], DenseVector[Double], DenseVector[Double]) = norm_switch match {
     case true =>
       (X1, y, beta)
     case _ =>
+
+      val eta_ = (X1 * beta)
+
+      val eta = eta_(0 to n-1)
+
+      val mu = exp(eta)
+
+      val z = DenseVector.vertcat((y-mu)/mu + eta, DenseVector.zeros[Double](X1.rows-y.length))
+      /*println("eta_")
+      println(eta_)
       println("X1.rows")
       println(X1)
       println("beta")
       println(beta)
-      val eta_ = (X1 * beta)
-      println("eta_")
-      println(eta_)
-      val eta = eta_(0 to n-1)
       println("eta")
       println(eta)
-      val mu = exp(eta)
-      //n-y.length
-      val z = DenseVector.vertcat((y-mu)/mu + eta, DenseVector.zeros[Double](X1.rows-y.length))
       println("z")
       println(z)
-      println(X1)
+      println(X1)*/
       val new_beta = X1 \ z
-      val tra_ = trA(X1, y.length-1)
-      val norm = form_residuals_squared(X1, new_beta, z, y.length-1)
-      fitting_loop(X1, y, q, n ,new_beta,false)
+      val tra_ = trA(X1, X1( n-1 to X1.rows-1,::), y.length-1)
+      val new_norm = form_residuals_squared(X1, new_beta, z, y.length-1)
+      //
+      fitting_loop(X1, y, q, n ,new_beta, new_norm, !(abs(new_norm-norm) > 0.00002))
   }
 
 
@@ -170,8 +185,8 @@ object HelloWorld {
     val vals = pow((y-X*beta),2)
     sum(vals(0 to n))
   }
-  def trA(X : DenseMatrix[Double], n : Int) : Double = {
-    val hat = diag(hat_matrix(X))
+  def trA(X : DenseMatrix[Double], S : DenseMatrix[Double], n : Int) : Double = {
+    val hat = diag(hat_matrix_smooth(X,S))
     val first_n_elements = hat(0 to n)
     sum(first_n_elements)
   }
@@ -179,6 +194,11 @@ object HelloWorld {
   def hat_matrix(X : DenseMatrix[Double]) : DenseMatrix[Double] = {
     X*inv(X.t*X)*X.t
   }
+
+  def hat_matrix_smooth(X : DenseMatrix[Double], S : DenseMatrix[Double]) : DenseMatrix[Double] = {
+    X*inv((X.t*X+S))*X.t
+  }
+
 
   def hat_matrixQR(X : DenseMatrix[Double]) : DenseMatrix[Double] = {
     //val qr_matrix_object = qr(X)
