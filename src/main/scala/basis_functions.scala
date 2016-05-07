@@ -12,7 +12,7 @@ object HelloWorld {
 
 
     //val knots = DenseVector[Double]((.0 to 1.0 by .02).toArray)
-    val knots = DenseVector[Double](0.0,0.2,0.5,0.65,0.7,0.75,0.8,0.85,0.92,0.95,0.97)
+    val knots = DenseVector[Double](0.0,0.2,0.5,0.65,0.7,0.75,0.8,0.85,0.92,0.95,0.97,1.0)
     val xp = DenseVector[Double]((.0 to 1.0 by .01).toArray)
     val size = DenseVector[Double](1.42,1.58,1.78,1.99,1.99,1.99,2.13,2.13,2.13, 2.32,2.32,2.32,2.32,2.32,2.43,2.43,2.78,2.98,2.98)
     val wear = DenseVector[Double](4.0,4.2,2.5,2.6,2.8,2.4,3.2,2.4,2.6,4.8,2.9,3.8,3.0,2.7,3.1,3.3,3.0,2.8,1.7)
